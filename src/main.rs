@@ -20,7 +20,7 @@ fn main() -> Result<()> {
         let url_path = format!("/{delay}/request-{i}");
         let request = get_req(&url_path);
 
-        let mut stream = std::net::TcpStream::connect(addr)?;
+        let mut stream: TcpStream = std::net::TcpStream::connect(addr)?;
 
         stream.set_nonblocking(true)?;
 
@@ -42,10 +42,36 @@ fn main() -> Result<()> {
             continue;
         }
 
-        handled_events += handled_events(&events, &mut streams)?;
+        handled_events += handle_events(&events, &mut streams)?;
     }
 
     Ok(())
+}
+
+fn handle_events(events: &[Event], streams: &mut [TcpStream]) -> Result<usize> {
+    let mut handled_events = 0;
+    for event in events {
+        let index = event.token();
+        let mut data = vec![0u8; 4096];
+        loop {
+            match streams[index].read(&mut data) {
+                Ok(n) if n == 0 => {
+                    handled_events += 1;
+                    break;
+                }
+                Ok(n) => {
+                    let txt = String::from_utf8_lossy(&data[..n]);
+                    println!("RECEIVED: {:?}", event);
+                    println!("{txt}\n------\n");
+                }
+                // Not ready to read in a non-blocking manner. This could
+                // happen even if the event was reported as ready
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    Ok(handled_events)
 }
 
 fn get_req(path: &str) -> String {
